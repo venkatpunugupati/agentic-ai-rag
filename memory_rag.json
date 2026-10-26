@@ -1,0 +1,34 @@
+[
+  {
+    "role": "system",
+    "content": "You solve problems step by step using tools.\nTools:\n- calculator: None\n- word_count: None\n- get_current_time: Returns the current local date and time. Call this for any question about the current time or date. Takes no arguments, pass {}.\n- search_docs: Search your personal documents (project notes, week reviews, your own code) for facts about your projects. Use ONLY for questions about your projects or documents \u2014 never for time, arithmetic, or word counts. Returns the top 3 chunks with similarity scores: if all scores are low and close together, the documents do not contain the answer \u2014 say so honestly and do not cite them. When you answer from a chunk, cite its label, e.g. [week3-review-draft.md #20]. Action Input: {\"query\": \"...\"}\n\nUse EXACTLY this format:\nThought: <reasoning about what to do next>\nAction: <tool name>\nAction Input: <JSON args, e.g. {\"expression\": \"2+2\"}>\n(You will receive an Observation. Then continue.)\nThought: <reasoning>\nFinal Answer: <answer to the user>\n\nRules: start every turn with Thought. One action per turn.\nIf the user's message needs no tools (a greeting, a statement, or something\nyou already know), skip the tools: output Thought and then Final Answer directly.\nWhen you have enough information, output Final Answer and stop."
+  },
+  {
+    "role": "system",
+    "content": "[Summary of prior steps]:\nThe Spring AI javadoc bug involves the `advisorOrder` field in the `ToolCallingAdvisor` class, where the documentation incorrectly suggests setting the order near `Ordered#LOWEST_PRECEDENCE` for priority execution. The correct method is to set it near `HIGHEST_PRECEDENCE`, as a lower order value indicates higher priority in Spring's ordering system. This issue is recorded in GitHub issue #7198."
+  },
+  {
+    "role": "user",
+    "content": "what is the capital of USA?"
+  },
+  {
+    "role": "assistant",
+    "content": "Washington, D.C."
+  },
+  {
+    "role": "user",
+    "content": "What is 15% of 240?"
+  },
+  {
+    "role": "assistant",
+    "content": "36.0"
+  },
+  {
+    "role": "user",
+    "content": "how does the grounding check work?"
+  },
+  {
+    "role": "assistant",
+    "content": "The grounding check process involves verifying whether a user prompt references temporal concepts (like time or date) and ensuring that the `get_current_time` tool is called during the interaction. If a temporal question is asked without calling `get_current_time`, it is flagged as ungrounded. The `GroundingVerificationAdvisor` manages this process to ensure context is correctly handled across multiple conversation turns."
+  }
+]

@@ -1,0 +1,217 @@
+[
+ {
+  "text": "import json,re,os\nfrom datetime import datetime\nfrom openai import OpenAI\nclient = OpenAI()\nMODEL = \"gpt-4o-mini\"\nMEMORY_FILE = \"memory.json\"\nMAX_MSGS = 5",
+  "source": "agent.py",
+  "index": 0
+ },
+ {
+  "text": "import datetime from openai import OpenAI client = OpenAI() MODEL = \"gpt-4o-mini\" MEMORY_FILE = \"memory.json\" MAX_MSGS = 5\n\ndef load_memory():\n   if not os.path.exists(MEMORY_FILE):\n      return None\n   try:\n      with open(MEMORY_FILE, \"r\", encoding=\"utf-8\") as f :\n           return json.load(f)\n   except (json.JSONDecodeError, OSError) as e :\n      print(f\"Warning: Failed to load memory file ({e}). Starting with fresh memory.\")  \n      return None\ndef validate_question(q):\n   if not isinstance(q, str) or not q.strip():\n        return False, \"Question cannot be empty.\"\n   return True, \"Valid\"\ndef check_grounding(question, run_messages):\n   # Check if user prompt references temporal concepts\n    temporal_pattern = r'\\b(time|date|today|now)\\b'\n    if not re.search(temporal_pattern, question, re.IGNORECASE):\n        return True, \"Temporal grounding check skipped (not a temporal question).\"\n    # Check if get_current_time was called in any assistant turn during this run\n    time_tool_called = False\n    for msg in run_messages:\n        if msg.get(\"role\") == \"assistant\":\n            content = msg.get(\"content\", \"\")",
+  "source": "agent.py",
+  "index": 1
+ },
+ {
+  "text": "during this run time_tool_called = False for msg in run_messages: if msg.get(\"role\") == \"assistant\": content = msg.get(\"content\", \"\")\n\n# Matches 'Action: get_current_time' in the ReAct trace format\n            if re.search(r\"Action:\\s*get_current_time\\b\", content):\n                time_tool_called = True\n                break",
+  "source": "agent.py",
+  "index": 2
+ },
+ {
+  "text": "msg.get(\"content\", \"\") # Matches 'Action: get_current_time' in the ReAct trace format if re.search(r\"Action:\\s*get_current_time\\b\", content): time_tool_called = True break\n\nif not time_tool_called:\n        return False, \"Flagged ungrounded: temporal question asked without calling 'get_current_time'.\"\n\n    return True, \"Grounded: time tool was executed.\"\ndef build_system_message():\n    return {\"role\": \"system\", \"content\": SYSTEM.format(\n        tools=\"\\n\".join(f\"- {n}: {f.__doc__}\" for n, f in TOOLS.items()))}  \ndef save_memory(messages):\n    with open(MEMORY_FILE,'w',encoding=\"utf-8\") as f :\n       json.dump(messages, f, indent=2)\ndef compact_memory(messages, keep_recent=4):\n    # Only compact if history exceeds system message + recent threshold + buffer\n    if len(messages) <= 1 + keep_recent + 2:\n        return messages\n\n    system_msg = messages[0]\n    old_turns = messages[1:-keep_recent]\n    recent_turns = messages[-keep_recent:]",
+  "source": "agent.py",
+  "index": 3
+ },
+ {
+  "text": "len(messages) <= 1 + keep_recent + 2: return messages system_msg = messages[0] old_turns = messages[1:-keep_recent] recent_turns = messages[-keep_recent:]\n\n# Synthesize old conversation turns into a bulleted summary\n    summary_prompt = [\n        {\"role\": \"system\", \"content\": \"You are a concise conversation summarizer.\"},\n        {\n            \"role\": \"user\",\n            \"content\": (\n                \"Summarize key facts, tool outputs, user preferences, and decisions from these turns \"\n                \"in under 150 words.\\n\\n\"\n                \"CRITICAL FILTERING RULES:\\n\"\n                \"- EXCLUDE volatile facts: drop specific times, clock readings, dates, and timestamp tool outputs \"\n                \"(e.g., outputs from get_current_time).\\n\"\n                \"- INCLUDE durable facts only: keep user preferences, calculated numerical results, \"\n                \"entities, established decisions, and key tool findings that remain permanently true.\\n\\n\"\n                f\"Turns to summarize:\\n{json.dumps(old_turns)}\"\n            ),\n        },\n    ]",
+  "source": "agent.py",
+  "index": 4
+ },
+ {
+  "text": "\" \"entities, established decisions, and key tool findings that remain permanently true.\\n\\n\" f\"Turns to summarize:\\n{json.dumps(old_turns)}\" ), }, ]\n\nresponse = client.chat.completions.create(\n        model=MODEL,\n        temperature=0,\n        messages=summary_prompt\n    )\n    summary_text = response.choices[0].message.content\n\n    summary_msg = {\n        \"role\": \"system\",\n        \"content\": f\"[Summary of prior steps]:\\n{summary_text}\"\n    }\n\n    return [system_msg, summary_msg] + recent_turns\n  \ndef calculator(expression: str) -> str:\n    if not re.fullmatch(r\"[\\d\\s+\\-*/%().]+\", expression):\n     return \"Error: invalid characters in expression\"\n    try:\n     return str(eval(expression ,{\"__builtins__\":{}},{}))\n    except Exception as e:\n     return f\"Error: {e}\"\n\ndef word_count(text: str) -> str:\n    return str(len(text.split()))\ndef get_current_time() -> str:\n   \"\"\"Returns the current local date and time. Call this for any question about the current time or date. Takes no arguments, pass {}.\"\"\"\n   return  datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")",
+  "source": "agent.py",
+  "index": 5
+ },
+ {
+  "text": "this for any question about the current time or date. Takes no arguments, pass {}.\"\"\" return datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")\n\nTOOLS = {\"calculator\": calculator, \"word_count\": word_count,\"get_current_time\": get_current_time}\ntools_str = \"\\n\".join(f\"- {n}: {f.__doc__}\" for n, f in TOOLS.items())\nSYSTEM = \"\"\"You solve problems step by step using tools.\nTools:\n{tools}\n\nUse EXACTLY this format:\nThought: <reasoning about what to do next>\nAction: <tool name>\nAction Input: <JSON args, e.g. {{\"expression\": \"2+2\"}}>\n(You will receive an Observation. Then continue.)\nThought: <reasoning>\nFinal Answer: <answer to the user>\n\nRules: start every turn with Thought. One action per turn.\nIf the user's message needs no tools (a greeting, a statement, or something\nyou already know), skip the tools: output Thought and then Final Answer directly.\nWhen you have enough information, output Final Answer and stop.\"\"\"",
+  "source": "agent.py",
+  "index": 6
+ },
+ {
+  "text": "tools: output Thought and then Final Answer directly. When you have enough information, output Final Answer and stop.\"\"\"\n\ndef make_plan(question: str) -> list[dict]:\n    planner_system_prompt = (\n        \"You are a strategic planning agent. Your task is to break down the user's \"\n        \"question into a minimal, logical, step-by-step plan using available tools \"\n        f\"Available Tools:\\n{tools_str}\\n\\n\"\n        \"Output ONLY a numbered list of steps, one per line, with no extra intro or outro text.\\n\"\n        \"Example:\\n\"\n        \"1. [get_current_time] Get the current year.\\n\"\n        \"2. [calculator] Compute 15% of the year from step 1.\\n\"\n        \"3. [synthesize] State the final answer.\"\n    )\n\n    messages = [\n        {\"role\": \"system\", \"content\": planner_system_prompt},\n        {\n            \"role\": \"user\",\n            \"content\": f\"Create a step-by-step plan to answer: {question}\",\n        },\n    ]\n\n    response = client.chat.completions.create(\n        model=MODEL, temperature=0, messages=messages\n    )\n\n    plan_text = response.choices[0].message.content.strip()",
+  "source": "agent.py",
+  "index": 7
+ },
+ {
+  "text": "a step-by-step plan to answer: {question}\", }, ] response = client.chat.completions.create( model=MODEL, temperature=0, messages=messages ) plan_text = response.choices[0].message.content.strip()\n\nplan = []\n    for line in plan_text.splitlines():\n        line = line.strip()\n        if not line:\n            continue\n        step_text = re.sub(r\"^(\\d+[\\.\\)]|\\-|\\*)\\s*\", \"\", line).strip()\n        if step_text:\n            plan.append({\"step\": step_text, \"status\": \"pending\"})\n    # Validate: every step's [bracket] must name a real tool or [synthesize]\n    valid_plan = []\n    for item in plan:\n        m = re.search(r\"\\[(\\w+)\\]\", item[\"step\"])\n        name = m.group(1) if m else None\n        if name in TOOLS or name == \"synthesize\":\n           valid_plan.append(item)\n        else:\n            print(f\"[Plan validation] Dropping step with unknown tool: {item['step']}\")\n    plan = valid_plan\n\n    print(\"\\n=== Initial Plan Generated ===\")\n    for idx, item in enumerate(plan, 1):\n        print(f\"  [{idx}] [{item['status'].upper()}] {item['step']}\")\n    print(\"==============================\\n\")\n    return plan",
+  "source": "agent.py",
+  "index": 8
+ },
+ {
+  "text": "print(\"\\n=== Initial Plan Generated ===\") for idx, item in enumerate(plan, 1): print(f\" [{idx}] [{item['status'].upper()}] {item['step']}\") print(\"==============================\\n\") return plan\n\ndef execute_plan(question,plan,history):\n    \"\"\"Executes a plan step-by-step with dynamic replanning after each step.\n\n    Args:\n        question: The original user question.\n        plan: Initial plan containing step dictionaries [{\"step\": \"...\", \"status\": \"pending\"}, ...].\n\n    Returns:\n        tuple: (results, final_answer)\n            results: List of (step_text, answer) tuples.\n            final_answer: The final synthesized answer or the answer from the last step.\n    \"\"\"\n    results = [] \n    current_plan = list(plan)  # Copy initial plan\n    replan_count = 0\n    step_num = 0\n    while current_plan:\n        # Find next pending step\n        current_step_item = next((s for s in current_plan if s.get(\"status\") == \"pending\"), None)\n        if not current_step_item:\n            break  # All steps executed\n        step_num += 1\n        step_text = current_step_item[\"step\"]",
+  "source": "agent.py",
+  "index": 9
+ },
+ {
+  "text": "s.get(\"status\") == \"pending\"), None) if not current_step_item: break # All steps executed step_num += 1 step_text = current_step_item[\"step\"]\n\n# 1. Render step input with prior results context\n        if results:\n            prior_context = \"Previous step results:\\n\" + \"\\n\".join(\n                f\"- {s}: {a}\" for s, a in results\n            )\n            step_input = f\"{prior_context}\\n\\nTask: {step_text}\\nUse the completed results above; do not redo completed steps.\"\n        else:\n            step_input = step_text\n\n        step_messages = history[:-1] + [\n            {\"role\": \"user\", \"content\": step_input},\n        ]\n\n        # 2. Run agent for the step\n        answer = run_agent(step_messages)",
+  "source": "agent.py",
+  "index": 10
+ },
+ {
+  "text": "history[:-1] + [ {\"role\": \"user\", \"content\": step_input}, ] # 2. Run agent for the step answer = run_agent(step_messages)\n\n# 3. Post-run grounding verification with one bounded retry\n        grounded, ground_reason = check_grounding(step_text, step_messages)\n        if not grounded:\n            print(f\"  [Grounding Violation in Step {step_num}]: {ground_reason} \u2014 retrying.\")\n            step_messages.append({\n                \"role\": \"user\",\n                \"content\": (\n                \"Observation: Time or temporal questions require calling get_current_time. \"\n                \"Call get_current_time now, then provide the final step answer.\"\n            ),\n        })\n            answer = run_agent(step_messages)\n            grounded, ground_reason = check_grounding(step_text, step_messages)\n            if not grounded:\n                print(f\"  [Warning - Step {step_num} Still Ungrounded]: {ground_reason}\")\n\n        # 3. Record result & mark step as done\n        results.append((step_text, answer))\n        current_step_item[\"status\"] = \"done\"",
+  "source": "agent.py",
+  "index": 11
+ },
+ {
+  "text": "{step_num} Still Ungrounded]: {ground_reason}\") # 3. Record result & mark step as done results.append((step_text, answer)) current_step_item[\"status\"] = \"done\"\n\nprint(f\"[EXECUTED STEP]: {step_text}\\n[ANSWER]: {answer}\\n\")\n\n        # 4. Extract remaining pending steps for replanning evaluation\n        remaining_steps = [s for s in current_plan if s.get(\"status\") == \"pending\"]\n\n        # If no steps remain, break and proceed to final synthesis\n        if not remaining_steps:\n            break\n\n        # 5. Invoke Replanner\n        verdict, new_remaining_steps = replan(question, results, remaining_steps)\n        print(f\"[REPLAN VERDICT]: {verdict} (Replans so far: {replan_count}/{MAX_REPLANS})\")\n\n        if verdict == \"DONE\":\n            print(\"[REPLAN]: Replanner marked task as DONE early.\")\n            break",
+  "source": "agent.py",
+  "index": 12
+ },
+ {
+  "text": "VERDICT]: {verdict} (Replans so far: {replan_count}/{MAX_REPLANS})\") if verdict == \"DONE\": print(\"[REPLAN]: Replanner marked task as DONE early.\") break\n\nelif verdict == \"REVISE\" and replan_count < MAX_REPLANS:\n            replan_count += 1\n            print(f\"[REPLAN]: Plan revised. Swapping in {len(new_remaining_steps)} new remaining step(s).\")\n            # Keep completed steps, drop old pending steps, append new revised pending steps\n            completed_steps = [s for s in current_plan if s.get(\"status\") == \"done\"]\n            current_plan = completed_steps + new_remaining_steps\n\n            print(\"\\n=== Updated Plan ===\")\n            for idx, item in enumerate(current_plan, 1):\n                print(f\"  [{idx}] [{item['status'].upper()}] {item['step']}\")\n            print(\"====================\\n\")\n\n        else:\n            # CONTINUE or cap hit -> proceed as-is\n            if verdict == \"REVISE\" and replan_count >= MAX_REPLANS:\n                print(\"[REPLAN]: Revision requested but MAX_REPLANS cap reached. Proceeding with existing plan.\")",
+  "source": "agent.py",
+  "index": 13
+ },
+ {
+  "text": "verdict == \"REVISE\" and replan_count >= MAX_REPLANS: print(\"[REPLAN]: Revision requested but MAX_REPLANS cap reached. Proceeding with existing plan.\")\n\n# 6. Final Answer Synthesis\n    if results:\n        # Generate a final consolidated response based on all step outputs\n        synthesis_prompt = history[:-1] + [\n            {\n                \"role\": \"user\",\n                \"content\": (\n                    f\"Original Question: {question}\\n\\n\"\n                    f\"Execution History:\\n\" +\n                    \"\\n\".join(f\"- {s}: {a}\" for s, a in results) +\n                    \"\\n\\nProvide the final, clear, and direct answer to the user's question based on the above results.\"\n                    \"Respond with exactly:\"\n                    \"Thought: <brief reasoning>\"\n                    \"Final Answer: <the answer>\"\n                )\n            }\n        ]\n        final_answer = run_agent(synthesis_prompt)\n    else:\n        final_answer = \"No execution steps completed.\"\n\n    return results, final_answer",
+  "source": "agent.py",
+  "index": 14
+ },
+ {
+  "text": "<the answer>\" ) } ] final_answer = run_agent(synthesis_prompt) else: final_answer = \"No execution steps completed.\" return results, final_answer\n\nMAX_REPLANS = 2\ndef replan(question, results, remaining_steps):\n    \"\"\"Evaluates progress and decides whether to CONTINUE, REVISE, or declare DONE.\n\n    Args:\n        question: Original user query.\n        results: List of completed (step_text, answer) tuples.\n        remaining_steps: List of pending step dicts (e.g. [{\"step\": \"...\"}, ...]).\n\n    Returns:\n        tuple: (verdict, new_remaining_steps)\n            verdict: \"CONTINUE\", \"REVISE\", or \"DONE\"\n            new_remaining_steps: Updated list of remaining step dicts\n    \"\"\"\n    # 1. Format inputs for prompt context\n    completed_str = \"\\n\".join(\n        f\"- Step: {s}\\n  Result: {a}\" for s, a in results\n    ) if results else \"None\"\n\n    remaining_str = \"\\n\".join(\n        f\"- {item['step'] if isinstance(item, dict) else item.step}\"\n        for item in remaining_steps\n    ) if remaining_steps else \"None\"",
+  "source": "agent.py",
+  "index": 15
+ },
+ {
+  "text": "= \"\\n\".join( f\"- {item['step'] if isinstance(item, dict) else item.step}\" for item in remaining_steps ) if remaining_steps else \"None\"\n\nreplanning_prompt = (\n        \"You are a dynamic replanning agent monitoring execution progress.\\n\\n\"\n        f\"Original Question: {question}\\n\\n\"\n        f\"Completed Steps and Results:\\n{completed_str}\\n\\n\"\n        f\"Remaining Planned Steps:\\n{remaining_str}\\n\\n\"\n        \"Evaluate if the completed results are sufficient to answer the original question, \"\n        \"if the remaining plan is still valid, or if a revised plan is needed.\\n\\n\"\n        \"You must output using EXACTLY this contract:\\n\"\n        \"VERDICT: CONTINUE | REVISE | DONE\\n\"\n        \"REVISED PLAN:\\n\"\n        \"1. [tool_name] First step\\n\"\n        \"2. [tool_name] Second step\\n\\n\"\n        \"Rules:\\n\"\n        \"- VERDICT must be one of: CONTINUE, REVISE, or DONE.\\n\"\n        \"- ONLY include 'REVISED PLAN:' if VERDICT is REVISE.\\n\"\n        \"- If REVISE, provide remaining steps using the standard [tool_name] format.\"\n    )",
+  "source": "agent.py",
+  "index": 16
+ },
+ {
+  "text": "'REVISED PLAN:' if VERDICT is REVISE.\\n\" \"- If REVISE, provide remaining steps using the standard [tool_name] format.\" )\n\nmessages = [\n        {\"role\": \"system\", \"content\": \"You are a precise, failure-resistant replanning agent.\"},\n        {\"role\": \"user\", \"content\": replanning_prompt}\n    ]\n\n    try:\n        response = client.chat.completions.create(\n            model=MODEL,\n            temperature=0,\n            messages=messages\n        )\n        output = response.choices[0].message.content.strip()\n    except Exception as e:\n        print(f\"Warning: Replanner LLM call failed ({e}). Defaulting to CONTINUE.\")\n        return \"CONTINUE\", remaining_steps\n    print(f\"  [replan tokens] prompt={response.usage.prompt_tokens}\")\n\n    # 2. Defensive Parsing \u2014 Fail-open to CONTINUE\n    verdict_match = re.search(r\"VERDICT:\\s*(CONTINUE|REVISE|DONE)\", output, re.IGNORECASE)\n    if not verdict_match:\n        print(\"Warning: Unparseable verdict from replanner. Defaulting to CONTINUE.\")\n        return \"CONTINUE\", remaining_steps",
+  "source": "agent.py",
+  "index": 17
+ },
+ {
+  "text": "= re.search(r\"VERDICT:\\s*(CONTINUE|REVISE|DONE)\", output, re.IGNORECASE) if not verdict_match: print(\"Warning: Unparseable verdict from replanner. Defaulting to CONTINUE.\") return \"CONTINUE\", remaining_steps\n\nverdict = verdict_match.group(1).upper()\n    \n    # 3. Handle REVISE Verdict\n    if verdict == \"REVISE\":\n        parsed_revised_steps = []\n        \n        # Isolate revised plan section if present\n        plan_part = output.split(\"REVISED PLAN:\")[-1] if \"REVISED PLAN:\" in output else output\n        \n        for line in plan_part.splitlines():\n            line = line.strip()\n            if not line or line.upper().startswith(\"VERDICT:\"):\n                continue\n            \n            # Use make_plan strip-numbering logic\n            step_text = re.sub(r\"^(\\d+[\\.\\)]|\\-|\\*)\\s*\", \"\", line).strip()\n            \n            # Validate [tool] bracket: must name a real tool or [synthesize]\n            m = re.search(r\"^\\[(\\w+)\\]\", step_text)\n            name = m.group(1) if m else None\n            if step_text and (name in TOOLS or name == \"synthesize\"):\n                parsed_revised_steps.append({\"step\": step_text, \"status\": \"pending\"})",
+  "source": "agent.py",
+  "index": 18
+ },
+ {
+  "text": "if m else None if step_text and (name in TOOLS or name == \"synthesize\"): parsed_revised_steps.append({\"step\": step_text, \"status\": \"pending\"})\n\n# Fail-safe: If revision extraction failed or produced no valid steps, keep remaining steps\n        if not parsed_revised_steps:\n            print(\"Warning: REVISE specified but failed to parse valid bracketed steps. Defaulting to CONTINUE.\")\n            return \"CONTINUE\", remaining_steps\n\n        return \"REVISE\", parsed_revised_steps\n\n    return verdict, remaining_steps\n\n\ndef run_agent(messages, max_steps=6):\n    \n    for step in range(max_steps):\n        resp = client.chat.completions.create(\n            model=MODEL, temperature=0,messages=messages)\n        text = resp.choices[0].message.content\n        print(f\"--- step {step} ---\\n{text}\\n\")\n        messages.append({\"role\": \"assistant\", \"content\": text})\n        print(f\"  [tokens]-- In run_agent prompt={resp.usage.prompt_tokens}\")",
+  "source": "agent.py",
+  "index": 19
+ },
+ {
+  "text": "model=MODEL, temperature=0,messages=messages) text = resp.choices[0].message.content print(f\"--- step {step} ---\\n{text}\\n\") messages.append({\"role\": \"assistant\", \"content\": text}) print(f\" [tokens]-- In run_agent prompt={resp.usage.prompt_tokens}\")\n\nif \"Final Answer:\" in text:\n            return text.split(\"Final Answer:\")[1].strip()\n        action_match = re.search(r\"Action:\\s*(\\w+)\", text)\n        input_match = re.search(r\"Action Input:\\s*(\\{.*\\})\", text, re.DOTALL)\n        if not action_match or not input_match:\n         observation = (\"Error: could not parse Action. Use exactly:\\n\"\n                    \"Action: <tool name>\\n\"\n                    'Action Input: {\"arg\": \"value\"}')\n        else:\n            try:\n                args = json.loads(input_match.group(1))\n            except json.JSONDecodeError as e:\n                observation = f\"Error: invalid JSON in Action Input: {e}\"\n            else:\n                name = action_match.group(1)\n                if name not in TOOLS:\n                    observation = f\"Error: unknown tool '{name}'. Available: {', '.join(TOOLS)}\"\n                else:\n                    observation = TOOLS[name](**args)",
+  "source": "agent.py",
+  "index": 20
+ },
+ {
+  "text": "if name not in TOOLS: observation = f\"Error: unknown tool '{name}'. Available: {', '.join(TOOLS)}\" else: observation = TOOLS[name](**args)\n\nmessages.append({\"role\": \"user\", \"content\": f\"Observation: {observation}\"})",
+  "source": "agent.py",
+  "index": 21
+ },
+ {
+  "text": "observation = f\"Error: unknown tool '{name}'. Available: {', '.join(TOOLS)}\" else: observation = TOOLS[name](**args) messages.append({\"role\": \"user\", \"content\": f\"Observation: {observation}\"})\n\nreturn \"stopped: max steps reached\"\n    \n\nif __name__ == \"__main__\":\n    import sys\n    fresh = \"--fresh\" in sys.argv\n    args = [a for a in sys.argv[1:] if not a.startswith(\"--\")]\n    question = args[0] if args else \"What is 15% of 240?\"\n\n    messages = None if fresh else load_memory()\n   \n    if messages is None:\n        messages = [build_system_message()]\n    if len(messages) > MAX_MSGS: \n       messages = compact_memory(messages)   \n\n    # 1. Validate Input\n    valid, reason = validate_question(question)\n    if not valid:\n        print(f\"Invalid input: {reason}\")\n        sys.exit(1)   \n    messages.append({\"role\": \"user\", \"content\": question})\n    plan = make_plan(question)\n    results, final_answer = execute_plan(question, plan, messages)\n    print(f\"\\nFinal Execution Results:\\n{results}\")\n    print(f\"\\nFinal Answer:\\n{final_answer}\")\n    if \"stopped\" not in final_answer.lower() :\n       messages.append({\"role\": \"assistant\", \"content\": final_answer})\n    save_memory(messages)",
+  "source": "agent.py",
+  "index": 22
+ },
+ {
+  "text": "# Spring AI Issue #7198: ToolCallingAdvisor.advisorOrder field javadoc inverts the sort direction\n\nFiled: October 18, 2026 \u2014 https://github.com/spring-projects/spring-ai/issues/7198\nRepo: spring-projects/spring-ai \u00b7 module: spring-ai-client-chat \u00b7 version: 2.0.1\n\n## Problem\n\nThe `advisorOrder` **field** javadoc in `ToolCallingAdvisor` (v2.0.1) tells users to set the order \"close to `Ordered#LOWEST_PRECEDENCE` to ensure an advisor is executed first in the chain (first for request processing, last for response processing).\" That is backwards. (The Builder method `advisorOrder(int)` javadoc is neutral \u2014 this cites the field.)\n\n## Why it is wrong\n\nAdvisors in the `ChatClient` chain are ordered by Spring's standard ordering convention: ascending order value, lower value = higher priority = executed first (`Ordered.LOWEST_PRECEDENCE` is `Integer.MAX_VALUE`, i.e. the lowest priority, so it runs **last**).",
+  "source": "spring-ai-issue-7198-doc.md",
+  "index": 23
+ },
+ {
+  "text": "value = higher priority = executed first (`Ordered.LOWEST_PRECEDENCE` is `Integer.MAX_VALUE`, i.e. the lowest priority, so it runs **last**).\n\nA concrete witness from the same class: `ToolCallingAdvisor.DEFAULT_ORDER = HIGHEST_PRECEDENCE + 300` \u2014 verified as `-2147483348` via `javap`. The tool loop deliberately sits near-first, which only makes sense under ascending sort; an advisor ordered at `DEFAULT_ORDER + 1` runs immediately after it on every loop iteration (verified behavior on 2.0.1, used to place a custom `CallAdvisor` inside the loop).\n\nAnyone following the javadoc's advice would put their advisor near `LOWEST_PRECEDENCE` \u2014 which places it last, the opposite of \"executed first.\"\n\n## Suggested fix\n\nChange the field javadoc to describe the direction correctly, e.g.: \"set the order close to `HIGHEST_PRECEDENCE` to ensure an advisor is executed first in the chain (first for request processing, last for response processing).\"\n\n## Found while",
+  "source": "spring-ai-issue-7198-doc.md",
+  "index": 24
+ },
+ {
+  "text": "advisor is executed first in the chain (first for request processing, last for response processing).\" ## Found while\n\nBuilding a custom `CallAdvisor` on Spring AI 2.0.1 (Spring Boot 4) that inspects each iteration of the tool loop; the inversion surfaced while positioning it relative to `ToolCallingAdvisor.DEFAULT_ORDER`.",
+  "source": "spring-ai-issue-7198-doc.md",
+  "index": 25
+ },
+ {
+  "text": "# Week 1\u20132 Review \u2014 draft skeleton (Friday Oct 9, 2026)\n\nFill the `[...]` gaps, then this is your portfolio + interview reference for Week 2.\n\n## Week 1 \u2014 LLM fundamentals \u2705 (Sep 30 \u2192 Oct 2)\n- First LLM API call (Sep 30); learned what tokens are \u2014 the crypto-tokens prompt bug as a lesson in prompt ambiguity\n- System prompts, few-shot prompting, embeddings\n- `extract.py`: job-posting \u2192 JSON with exactly 5 keys (title, company, location, skills[], salary); system-prompt schema, temperature=0, JSON response mode, key validation, one bounded retry feeding the validation error back; both test postings ran end to end",
+  "source": "week2-review-draft.md",
+  "index": 26
+ },
+ {
+  "text": "mode, key validation, one bounded retry feeding the validation error back; both test postings ran end to end\n\n## Week 2 \u2014 Agent architecture, raw ReAct from scratch \u2705 closing today\n- **Day 1 (Oct 5):** `agent.py` \u2014 Thought / Action / Action Input loop, tool observations, max 6 steps; tools: calculator, word_count, get_current_time (gpt-4o-mini, temp 0). Proof the loop is real: get_current_time returned a timestamp frozen training data couldn't know. First chained multi-tool run verified.\n- **Day 2 (Oct 6):** Memory across runs \u2014 full message list \u2192 `memory.json` (load at startup, save at end, `--fresh` flag); prompt_tokens printed each run to watch growth.\n- **Day 3 (Oct 7):** Compaction (rolling summary; `MAX_MSGS=12`) + guardrails v2. 484\u21921066 prompt-token growth motivated it. Summarizer keeps durable facts, drops volatile ones; `check_grounding` scans the trace for a get_current_time Action on temporal questions and appends one corrective observation for a bounded retry. Honest fallback on `stopped: max steps reached`.",
+  "source": "week2-review-draft.md",
+  "index": 27
+ },
+ {
+  "text": "temporal questions and appends one corrective observation for a bounded retry. Honest fallback on `stopped: max steps reached`.\n\n- **Day 4 (Oct 8):** Plan-and-execute + bounded replanner. Planner emits `[tool]`-bracketed steps, deterministic validation against the tool registry (a hallucinated `[search]` was dropped live before any tokens were spent). Executor injects prior (step, answer) results; replanner returns CONTINUE / REVISE / DONE, failing open to CONTINUE, capped at `MAX_REPLANS=2`. AAPL forced-failure: honest refusal, no invented price.\n- **Day 5 (Oct 9):** Capstone \u2014 full composition validate \u2192 plan \u2192 execute \u2192 verify \u2192 persist \u2192 compact. Three integration bugs found in code review and fixed yourself (tuple-leak into transcript, undefined `idx`, vacuous pre-execution grounding check); an indent bug that ran every step twice was fixed and trace-verified. Acceptance test 1: \"9 words \u00d7 hour 12 \u2212 10\" \u2192 **98**, replanner DONE early at 0/2 replans, tool-capable synthesis computed the answer itself. Summarizer now carries an explicit volatile-fact drop-list, closing the Day-3 staleness hole.",
+  "source": "week2-review-draft.md",
+  "index": 28
+ },
+ {
+  "text": "tool-capable synthesis computed the answer itself. Summarizer now carries an explicit volatile-fact drop-list, closing the Day-3 staleness hole.\n\n## Measured numbers (capture while fresh)\n| Metric | Value |\n|---|---|\n| Prompt-token growth, uncompacted | 484 \u2192 1066 |\n| Compaction effect | 691 \u2192 489 |\n| Replanner noise bill, Oct 8 (2 redundant REVISEs) | 1,026 prompt tokens |\n| Replanner bill, Oct 9 capstone | 622 prompt tokens (DONE at 0/2 replans) |\n| Compaction trigger | MAX_MSGS = 12 |\n| ReAct guard | max 6 steps |\n| Replanner guard | MAX_REPLANS = 2, fail-open CONTINUE |\n| `--fresh` purge run | 173 prompt tokens; 15% of 240 = 36.0 \u2705 |\n| Capstone acceptance | 9 words, hour 12, 9\u00d712\u221210 = **98** \u2705 |\n| Triviality tax (\"I like coffee\") | 8 LLM calls for a 3-word statement \u2192 needs a router / fast path |",
+  "source": "week2-review-draft.md",
+  "index": 29
+ },
+ {
+  "text": "like coffee\") | 8 LLM calls for a 3-word statement \u2192 needs a router / fast path |\n\n## Failure stories \u2192 interview answers (your scar tissue)\n1. **Stale summarized time.** Compaction preserved \"12:02 PM Oct 6\" as a durable fact; agent served it Oct 7 with no tool call. Lesson: timeless vs time-sensitive facts need different memory treatment. Guardrail: `check_grounding` on temporal questions.\n2. **Hallucinated `[search]`.** Planner twice invented a tool. Prompt tweak half-worked and cost tokens on every call; deterministic registry validation killed it for free. \"Prompts suggest, code enforces.\"\n3. **Indent bug.** Every step ran `run_agent` twice and recorded deflected answers, misleading the replanner. Fixed; trace-verified.\n4. **Write-only memory.** After the Day 4 refactor, messages loaded and saved in `__main__` but were never threaded into execute_plan or synthesis. Diagnosed from the trace, not the guess.",
+  "source": "week2-review-draft.md",
+  "index": 30
+ },
+ {
+  "text": "saved in `__main__` but were never threaded into execute_plan or synthesis. Diagnosed from the trace, not the guess.\n\n5. **Tool-called \u2260 answer-grounded.** The Biden answer passed the grounding check (tool was invoked) while the claim came from stale parametric memory. The check verifies invocation, not derivation. \"The final answer is a claim; the tool-observed trace is evidence.\"\n6. **Replanner noise.** 1,026 tokens on two redundant REVISE verdicts after 303.9 was already computed; the MAX_REPLANS=2 cap stopped the third. The prompt-rule fix was tried and reverted same evening (half-worked, taxed every verdict) \u2014 the cap plus fail-open CONTINUE is the retained behavior.",
+  "source": "week2-review-draft.md",
+  "index": 31
+ },
+ {
+  "text": "and reverted same evening (half-worked, taxed every verdict) \u2014 the cap plus fail-open CONTINUE is the retained behavior.\n\n## Still open\n- [ ] Compaction proof test on the Day-5 system (does the summary keep Venkat/likes-coffee/from-India and drop clock readings?) \u2014 `[result: ...]`\n- Contradictory facts (\"filter coffee\" vs \"indian food\") get sampled, not versioned \u2014 acknowledged, unresolved\n- Stretch not taken: plan-and-execute vs greedy ReAct token comparison on the same task\n\n## What's next\nWeek 3 starts Monday: LangChain4j + Spring AI \u2014 rebuild the core in Java, on home turf.\n\n---\n*Skeleton prepared Oct 9, 2026 \u2014 facts from the week's chat traces and memory notes. You own the synthesis.*",
+  "source": "week2-review-draft.md",
+  "index": 32
+ },
+ {
+  "text": "# Week 3 Review \u2014 Frameworks: LangChain4j & Spring AI\n\n*Theme: the same agent, three substrates. What the frameworks commoditized, what stayed mine.*\n\n## Day-by-day\n\n**Day 1 (Oct 12) \u2014 LangChain4j port.** New Maven project `~/Desktop/AI_Java/agent` (Java 27, Maven 3.10.0, langchain4j-bom 1.20.0 \u2014 1.19.1 deliberately avoided over the wrong-branch incident). Three `@Tool` POJOs (hand-written recursive-descent calculator \u2014 no `eval` in the JDK), `Assistant` interface with `@SystemMessage`/`@MemoryId`/`@UserMessage`, `MessageWindowChatMemory` via `ChatMemoryProvider`. Verified: warmup 36, chained word_count\u2192calculator (4 words \u2192 12), same-JVM name recall, fresh-JVM forget. Theory set: annotations declare, the generated AiServices proxy runs the loop; no visible Thought text \u2014 reasoning goes latent.",
+  "source": "week3-review-draft.md",
+  "index": 33
+ },
+ {
+  "text": "set: annotations declare, the generated AiServices proxy runs the loop; no visible Thought text \u2014 reasoning goes latent.\n\n**Day 2 (Oct 13) \u2014 `FileChatMemoryStore`.** One JSON file per memory id via `ChatMessageSerializer`/`Deserializer`, wired through the `ChatMemoryProvider`. Acceptance: fresh-JVM `user-1` recalled the name; `user-2` got \"I don't have access to personal information\" (routing by id, no leakage). Trace showed tool-request `AiMessage`s and `ToolExecutionResultMessage`s round-tripping through JSON. The `maxMessages(4)` probe: file pinned at 4, orphan eviction (evicting a tool-request dragged its result along), Q/A splitting, eventual name loss. Restored to 10. Distinction articulated: *eviction deletes; compaction distills.*",
+  "source": "week3-review-draft.md",
+  "index": 34
+ },
+ {
+  "text": "dragged its result along), Q/A splitting, eventual name loss. Restored to 10. Distinction articulated: *eviction deletes; compaction distills.*\n\n**Day 3 (Oct 14) \u2014 Spring AI port.** Standalone project `~/Desktop/AI_Java/agent_springAI` (Boot 4.1.0, Spring AI 2.0.1). Property rename caught live (`.options` segment gone in 2.0). First run 401'd \u2014 `OPENAI_API_KEY` not exported in the fresh VS Code terminal; the advisor chain was already correct. Acceptance family: chained question \u2192 27; unattached current-time tool \u2192 honest refusal with zero `toolCalls` in the DEBUG trace; `max-total-tool-calls=1` probe \u2192 graceful final response, confirming the shipped 40/tool and 150/turn caps.",
+  "source": "week3-review-draft.md",
+  "index": 35
+ },
+ {
+  "text": "`toolCalls` in the DEBUG trace; `max-total-tool-calls=1` probe \u2192 graceful final response, confirming the shipped 40/tool and 150/turn caps.\n\n**Day 4 (Oct 15) \u2014 `GroundingVerificationAdvisor`.** Multi-turn CLI runner (one JVM, one request per arg, turn boundaries). Advisor at `ToolCallingAdvisor.DEFAULT_ORDER + 1` (\u22122147483348 + 1, verified via `javap`); correct method is `adviseCall`, not `adviseRequest`. Core seam found the hard way: a flag in `request.context()` does **not** survive tool-loop iterations (fresh context copy per iteration) \u2014 the once-per-turn bound uses a transcript scan for the `grounding-` marker instead. Synthetic `grounding-{id}` tool call verified: `ToolCallingAdvisor` detects it via `hasToolCalls()` and executes. All four acceptance tests passed: fault-injected stale temporal \u2192 fresh time; natural temporal \u2192 silent; non-temporal (15% of 240 \u2192 36) \u2192 silent; exactly one marker per turn.",
+  "source": "week3-review-draft.md",
+  "index": 36
+ },
+ {
+  "text": "time; natural temporal \u2192 silent; non-temporal (15% of 240 \u2192 36) \u2192 silent; exactly one marker per turn.\n\n**Day 5 (Oct 16) \u2014 the compare.** Side-by-side chained question \u2192 27 on all three, with three different tool-call shapes (Python 0 via the deterministic no-tool rule; LangChain4j 3 with a parallel-call hazard; Spring 2, clean sequential). Ledger written. Pending Week 2 compaction proof test **passed** \u2014 the volatile-fact drop-list is now trace-verified (see numbers).\n\n## Numbers",
+  "source": "week3-review-draft.md",
+  "index": 37
+ },
+ {
+  "text": "Pending Week 2 compaction proof test **passed** \u2014 the volatile-fact drop-list is now trace-verified (see numbers). ## Numbers\n\n| # | Measurement |\n|---|---|\n| `maxMessages(4)` probe (LC4j) | file pinned at 4; orphan eviction; Q/A split; name lost |\n| Spring window | 20 (the \"11-message mystery\" \u2014 11 \u2264 20, no eviction expected; resolved Oct 16) |\n| Spring loop caps | 40/tool, 150/turn; limit=1 \u2192 graceful final response |\n| Advisor order | `ToolCallingAdvisor.DEFAULT_ORDER` = \u22122147483348; verifier at +1 |\n| Side-by-side prompt tokens | Python ~1,073 (3 calls) vs Spring ~672 (195\u2192226\u2192251) |\n| Compaction proof (Oct 16) | summary held \"Venkat\", zero clock/date strings; fresh `get_current_time` on re-ask \u2014 drop-list verified |\n| Python `compact_memory` (Week 2) | 691 \u2192 489 tokens on compaction; name retained |\n\n## Failure stories (with interview hooks)",
+  "source": "week3-review-draft.md",
+  "index": 38
+ },
+ {
+  "text": "(Week 2) | 691 \u2192 489 tokens on compaction; name retained | ## Failure stories (with interview hooks)\n\n1. **Dead provider (Day 2).** The new `FileChatMemoryStore` provider sat unwired \u2014 the assistant still used the heap-only one \u2014 and `args[0]` collided memory id with the question. Fix: wire the provider into the AiServices builder; id from `MEMORY_ID` env. *Hook: \"I verify wiring with a negative control \u2014 user-2 must NOT know user-1's name.\"*\n2. **Commented `.user(q)` (Day 4).** The runner loop referenced the question array instead of the current question. *Hook: haste bug, caught by reading the trace, not the code.*\n3. **`adviseCall`, not `adviseRequest` (Day 4).** Wrong interface method name; compile error. *Hook: \"I read the framework's interface, not just the tutorial.\"*\n4. **The context-flag seam (Day 4).** Once-per-turn flag in `request.context()` silently didn't survive loop iterations. Fix: transcript marker scan. *Hook: \"Framework internals beat my assumption \u2014 I verified with a trace, then designed around the real behavior.\"*",
+  "source": "week3-review-draft.md",
+  "index": 39
+ },
+ {
+  "text": "*Hook: \"Framework internals beat my assumption \u2014 I verified with a trace, then designed around the real behavior.\"*\n\n5. **The \"date\" false positive (Day 4).** Filler \"say the word date\" matched the temporal regex; advisor fabricated `getCurrentTime`. Known precision/recall tradeoff, disclosed not hidden. *Hook: \"I can tell you where my verifier is imprecise and what it costs.\"*\n6. **Upstream javadoc bug (Day 4).** `ToolCallingAdvisor`'s `advisorOrder` javadoc contradicts the ascending-sort implementation \u2014 verified against 2.0.1 source. *Hook: \"I read framework source when docs and behavior disagree.\"*\n7. **The 11-message window mystery (Oct 15\u201316).** Turn-6 prompt held 11 messages under an assumed `maxMessages(10)`. Resolution: the window had been changed to 20. *Hook: \"I check my own config before blaming the framework.\"*",
+  "source": "week3-review-draft.md",
+  "index": 40
+ },
+ {
+  "text": "Resolution: the window had been changed to 20. *Hook: \"I check my own config before blaming the framework.\"*\n\n8. **The `phrase` TypeError (Day 5).** Model emitted `{\"phrase\": ...}`; `word_count()` wanted another kwarg \u2014 tool descriptions are `None`, so the model guesses arg names. Plus `TOOLS[name](**args)` unguarded: one bad call kills the run. Fix identified, not yet applied. *Hook: \"Schemas aren't documentation \u2014 they're the contract the model reasons against.\"*\n9. **The parallel-call hazard (Day 5).** LangChain4j fired `calculate(\"3\")` in the same block as `countWords` \u2014 the dependency violation, live, self-corrected. *Hook: \"This is what my plan-and-execute wrapper exists to prevent \u2014 sequential steps with injected results.\"*\n10. **Duplicate `UserMessage` (Day 5, unverified).** The LC4j prompt carried the question twice \u2014 likely Main double-adding what the framework already adds. Open thread.",
+  "source": "week3-review-draft.md",
+  "index": 41
+ },
+ {
+  "text": "The LC4j prompt carried the question twice \u2014 likely Main double-adding what the framework already adds. Open thread.\n\n## The edge, in one paragraph\n\nBoth frameworks commoditized the loop, the window, the caps, and the tool schema plumbing. Neither ships grounding verification, rolling-summary compaction with a staleness policy, or plan-and-execute with bounded replanning \u2014 those are judgments, not machinery, and they ported: the verifier moved from raw Python to a Spring advisor in a day. Missing everywhere: token/dollar budget, write-tool approval, eval harness.\n\n## Open threads\n\n- `word_count` schema fix + guarded tool execution (story 8) \u2014 identified, not applied.\n- LangChain4j duplicate `UserMessage` (story 10) \u2014 unverified.\n- Contradictory facts still sampled, not versioned (Week 2 carryover).\n- Optional: upstream Spring AI issue on the javadoc bug (public portfolio artifact).\n\n## My framing (fill in)\n\n- The one-line senior answer this week earned me:\n- The Week 3 story I'd tell in an interview:",
+  "source": "week3-review-draft.md",
+  "index": 42
+ }
+]
