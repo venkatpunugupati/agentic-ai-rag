@@ -78,19 +78,4 @@ python chunk.py && python embed.py
 python retrieve.py
 python generate.py
 python agent_rag.py "what was the Spring AI javadoc bug?"
-```
 
-Then, if you haven't committed yet, this covers everything in one commit:
-
-```
-git add README.md
-git commit -m "applied RAG and agentic RAG (retrieval as a tool)"
-```
-
-If you already committed, use `git commit -m "Add README"` instead. Then create the empty `agentic-ai-rag` repo if you haven't, and push:
-
-```
-git remote add origin https://github.com/venkatpunugupati/agentic-ai-rag.git
-git branch -M main
-git push -u origin main
-```
