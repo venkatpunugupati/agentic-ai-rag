@@ -1,13 +1,10 @@
-Here's the RAG README. Save it as `README.md` in `~/Desktop/AI_Python_rag`:
 
-```
 # Applied RAG + Agentic RAG
 
 
 ## The pipeline
 
-Corpus: 4 documents the author knows cold → 21 chunks. Day 1's hygiene
-lesson: the first pass produced 79 chunks, 58 of them PDF binary garbage —
+Corpus: 4 documents the author knows cold → 21 chunks. The first pass produced 79 chunks, 58 of them PDF binary garbage —
 swapped the PDF for .md.
 
 - `chunk.py`: recursive character splitter — paragraphs → lines → words —
@@ -87,7 +84,7 @@ Then, if you haven't committed yet, this covers everything in one commit:
 
 ```
 git add README.md
-git commit -m "Week 4: applied RAG and agentic RAG (retrieval as a tool)"
+git commit -m "applied RAG and agentic RAG (retrieval as a tool)"
 ```
 
 If you already committed, use `git commit -m "Add README"` instead. Then create the empty `agentic-ai-rag` repo if you haven't, and push:
